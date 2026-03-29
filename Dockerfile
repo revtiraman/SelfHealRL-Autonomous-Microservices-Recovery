@@ -34,7 +34,7 @@ COPY core/   core/
 COPY env/    env/
 COPY server/ server/
 COPY training/ training/
-COPY models/   models/
+# models/ is gitignored (large .zip files); PPO agent loads from mounted volume or env var
 
 # ── Copy pre-trained model if available ───────────────────────
 # The selfheal_agent_final.zip is copied above via models/ directory.
