@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import os
+import random
 from typing import Optional
 
+import gymnasium as gym
+import numpy as np
 from stable_baselines3 import PPO
 from stable_baselines3.common.monitor import Monitor
 from stable_baselines3.common.vec_env import DummyVecEnv
@@ -12,6 +15,48 @@ from stable_baselines3.common.vec_env import DummyVecEnv
 from env.selfheal_env import SelfHealEnv
 from training.callbacks import CurriculumCallback, MetricsCallback
 from training.evaluate import compare_agents, evaluate_agent
+
+
+class MixedDifficultyEnv(gym.Env):
+    """Wraps SelfHealEnv and randomly samples difficulty each episode.
+
+    Prevents catastrophic forgetting by replaying easier difficulties
+    during harder training phases.
+    """
+
+    metadata = {"render_modes": []}
+
+    def __init__(self, difficulties: list[tuple[str, float]], partial_observability: bool = True):
+        """
+        difficulties: list of (difficulty_name, probability) tuples, must sum to 1.0
+        """
+        super().__init__()
+        self.difficulties = [d for d, _ in difficulties]
+        self.weights = [w for _, w in difficulties]
+        self.partial_observability = partial_observability
+        # Build a representative env to get spaces
+        sample_env = SelfHealEnv(difficulty=self.difficulties[0], partial_observability=partial_observability)
+        self.observation_space = sample_env.observation_space
+        self.action_space = sample_env.action_space
+        self._env: Optional[SelfHealEnv] = None
+
+    def _new_env(self) -> SelfHealEnv:
+        diff = random.choices(self.difficulties, weights=self.weights, k=1)[0]
+        return SelfHealEnv(difficulty=diff, partial_observability=self.partial_observability)
+
+    def reset(self, seed=None, options=None):
+        self._env = self._new_env()
+        return self._env.reset(seed=seed, options=options)
+
+    def step(self, action):
+        return self._env.step(action)
+
+    def render(self):
+        return self._env.render() if self._env else None
+
+    def close(self):
+        if self._env:
+            self._env.close()
 
 TRAINING_PHASES = {
     "phase1_easy": {
@@ -26,7 +71,8 @@ TRAINING_PHASES = {
         "description": "Learn basic recovery on easy scenarios",
     },
     "phase2_medium": {
-        "difficulty": "MEDIUM",
+        # Mix: 70% MEDIUM, 30% EASY replay to prevent forgetting
+        "difficulty": [("MEDIUM", 0.7), ("EASY", 0.3)],
         "partial_observability": False,
         "total_timesteps": 100_000,
         "learning_rate": 1e-4,
@@ -34,10 +80,11 @@ TRAINING_PHASES = {
         "batch_size": 64,
         "n_epochs": 10,
         "gamma": 0.99,
-        "description": "Handle multi-service failures",
+        "description": "Handle multi-service failures (70% MEDIUM + 30% EASY replay)",
     },
     "phase3_hard_partial": {
-        "difficulty": "HARD",
+        # Mix: 60% HARD, 20% MEDIUM, 20% EASY replay
+        "difficulty": [("HARD", 0.6), ("MEDIUM", 0.2), ("EASY", 0.2)],
         "partial_observability": True,
         "total_timesteps": 200_000,
         "learning_rate": 5e-5,
@@ -45,10 +92,11 @@ TRAINING_PHASES = {
         "batch_size": 128,
         "n_epochs": 10,
         "gamma": 0.995,
-        "description": "Hard scenarios with partial observability",
+        "description": "Hard scenarios with partial obs (60% HARD + 20% MED + 20% EASY)",
     },
     "phase4_chaos": {
-        "difficulty": "CHAOS",
+        # Mix: 50% CHAOS, 20% HARD, 20% MEDIUM, 10% EASY replay
+        "difficulty": [("CHAOS", 0.5), ("HARD", 0.2), ("MEDIUM", 0.2), ("EASY", 0.1)],
         "partial_observability": True,
         "total_timesteps": 300_000,
         "learning_rate": 3e-5,
@@ -56,7 +104,7 @@ TRAINING_PHASES = {
         "batch_size": 128,
         "n_epochs": 15,
         "gamma": 0.995,
-        "description": "Random chaos scenarios",
+        "description": "Chaos + all difficulties replay (50/20/20/10 split)",
     },
 }
 
@@ -70,9 +118,12 @@ class Trainer:
         os.makedirs(model_dir, exist_ok=True)
         os.makedirs(log_dir, exist_ok=True)
 
-    def _make_env(self, difficulty: str, partial_observability: bool):
+    def _make_env(self, difficulty, partial_observability: bool):
         def _init():
-            env = SelfHealEnv(difficulty=difficulty, partial_observability=partial_observability)
+            if isinstance(difficulty, list):
+                env = MixedDifficultyEnv(difficulty, partial_observability=partial_observability)
+            else:
+                env = SelfHealEnv(difficulty=difficulty, partial_observability=partial_observability)
             return Monitor(env)
         return _init
 
@@ -136,9 +187,11 @@ class Trainer:
         for phase in phases:
             prev_path = self.train(phase, prev_model_path=prev_path)
 
-            # Quick eval after each phase
+            # Quick eval after each phase (always eval on single difficulty)
             model = PPO.load(prev_path)
-            stats = evaluate_agent(model, num_episodes=20, difficulty=TRAINING_PHASES[phase]["difficulty"])
+            diff_cfg = TRAINING_PHASES[phase]["difficulty"]
+            eval_diff = diff_cfg[0][0] if isinstance(diff_cfg, list) else diff_cfg
+            stats = evaluate_agent(model, num_episodes=20, difficulty=eval_diff)
             print(f"\n  Phase {phase} eval: success={stats['success_rate']:.0%}, "
                   f"reward={stats['mean_reward']:.1f}, grade={stats['mean_grade_score']:.2f}")
 

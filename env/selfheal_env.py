@@ -255,19 +255,12 @@ class SelfHealEnv(gym.Env):
             return reward
 
         if is_observe:
-            down_services = set(self.mesh.get_down_services())
-            degraded_services = set(self.mesh.get_degraded_services())
             if target_service not in self._observed_this_episode:
                 self._observed_this_episode.add(target_service)
-                # Big bonus for observing an afflicted service, tiny bonus otherwise
-                if target_service in down_services or target_service in degraded_services:
-                    reward += 3.0
-                else:
-                    reward += 0.2
+                reward += 1.0
             else:
-                # Repeated observe is always penalized when something is down
-                if down_services:
-                    reward -= 3.0
+                if self.mesh.get_down_services():
+                    reward -= 2.0
             return reward
 
         # Service recovery: only reward the FIRST recovery per service per episode
