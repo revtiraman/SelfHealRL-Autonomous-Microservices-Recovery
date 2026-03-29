@@ -2,8 +2,8 @@ __pycache__/
 *.py[cod]
 *.pycache
 .DS_Store
-*.zip
-models/
+# models/ and *.zip are now tracked (pre-trained agents)
+# models/
 logs/
 *.egg-info/
 dist/
