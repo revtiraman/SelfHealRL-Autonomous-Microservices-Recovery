@@ -46,9 +46,13 @@ class MetricsCallback(BaseCallback):
 
 
 class CurriculumCallback(BaseCallback):
-    """Monitors performance and signals when agent is ready for next phase."""
+    """Monitors performance and stops training early when success_rate > threshold.
 
-    def __init__(self, success_threshold: float = 0.8, window: int = 50, verbose: int = 1):
+    Prioritized phase advancement: instead of fixed timesteps, the agent
+    advances to the next phase as soon as it demonstrates competence.
+    """
+
+    def __init__(self, success_threshold: float = 0.70, window: int = 50, verbose: int = 1):
         super().__init__(verbose)
         self.success_threshold = success_threshold
         self.window = window
@@ -59,7 +63,6 @@ class CurriculumCallback(BaseCallback):
         infos = self.locals.get("infos", [])
         for info in infos:
             if "episode" in info:
-                # Consider success if reward > 0
                 success = info["episode"]["r"] > 0
                 self.episode_successes.append(float(success))
 
@@ -70,6 +73,11 @@ class CurriculumCallback(BaseCallback):
                     if recent_rate >= self.success_threshold and not self.ready_for_next:
                         self.ready_for_next = True
                         if self.verbose:
-                            print(f"\n  *** Ready for next phase! Success rate: {recent_rate:.1%} ***\n")
+                            print(
+                                f"\n  *** Phase mastered! "
+                                f"Success rate {recent_rate:.1%} >= {self.success_threshold:.0%} "
+                                f"— stopping early and advancing ***\n"
+                            )
+                        return False  # stops model.learn() early
 
         return True

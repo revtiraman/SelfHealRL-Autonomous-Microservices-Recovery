@@ -209,10 +209,12 @@ REWARD_CONFIG: Dict[str, float] = {
 MAX_STEPS_PER_EPISODE: int = 30
 ACTION_BUDGET: int = 10  # max non-observe actions per episode
 
-# Observation: 7 values per service + 4 global = 74
-OBS_PER_SERVICE: int = 7
+# Observation: 10 values per service + 4 global = 104
+# Per-service: observed, cpu, memory, latency, error_rate, status, alert,
+#              has_unmet_deps, steps_since_observed (normalized), est_failure_type
+OBS_PER_SERVICE: int = 10
 OBS_GLOBAL: int = 4
-OBSERVATION_DIM: int = OBS_PER_SERVICE * NUM_SERVICES + OBS_GLOBAL  # 74
+OBSERVATION_DIM: int = OBS_PER_SERVICE * NUM_SERVICES + OBS_GLOBAL  # 104
 
 # Noise
 METRIC_NOISE_STD: float = 0.05

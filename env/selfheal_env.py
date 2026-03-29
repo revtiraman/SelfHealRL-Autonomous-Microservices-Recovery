@@ -141,7 +141,7 @@ class SelfHealEnv(gym.Env):
         is_noop = action_type == "do_nothing"
 
         if is_observe:
-            self.obs_encoder.mark_observed(target_service)
+            self.obs_encoder.mark_observed(target_service, current_step=self.current_step)
             action_success = True
             action_desc = f"Observed {target_service}"
         elif is_noop:
@@ -218,6 +218,10 @@ class SelfHealEnv(gym.Env):
         return self.obs_encoder.encode(
             self.mesh, self.current_step, self.actions_remaining, alerts
         )
+
+    def action_masks(self) -> np.ndarray:
+        """Return boolean action mask for MaskablePPO (sb3-contrib)."""
+        return self.obs_encoder.get_action_mask(self.mesh)
 
     # ── Action decoding ───────────────────────────────────────
 
