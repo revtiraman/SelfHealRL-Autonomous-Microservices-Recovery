@@ -14,99 +14,126 @@ tags:
   - rl-environment
 ---
 
-# SelfHealRL — Autonomous Microservices Recovery Agent
+# 🏥 SelfHealRL — Autonomous Microservices Recovery
 
-An RL agent that learns to **diagnose and fix cascading failures** in a 10-service microservice mesh. Built with Gymnasium, Stable-Baselines3, and Gradio.
+> **An RL agent that autonomously diagnoses and fixes cascading failures in a 10-service microservice mesh — no human rules, no manual intervention.**
 
-![Python](https://img.shields.io/badge/python-3.10+-blue)
-![Gymnasium](https://img.shields.io/badge/Gymnasium-0.29-green)
-![SB3](https://img.shields.io/badge/Stable--Baselines3-2.2-orange)
+[![Python](https://img.shields.io/badge/python-3.10+-blue)](https://python.org)
+[![Gymnasium](https://img.shields.io/badge/Gymnasium-1.0-green)](https://gymnasium.farama.org)
+[![SB3](https://img.shields.io/badge/Stable--Baselines3-2.7-orange)](https://stable-baselines3.readthedocs.io)
+[![HF Space](https://img.shields.io/badge/🤗%20Demo-Live-yellow)](https://huggingface.co/spaces/revti126/selfheal-rl-demo)
+[![License](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 
-## The Problem
+---
 
-When a microservice fails in production, the failure **cascades** through dependent services — a database crash can take down auth, which kills the API gateway, which drops the entire system. SREs must quickly:
+## 🏆 Hackathon Results
+
+| Task | Score | Threshold | Status |
+|:-----|:-----:|:---------:|:------:|
+| task_easy — Single Fault Recovery | **0.9000** | ≥ 0.70 | ✅ PASS |
+| task_medium — Cascade Recovery | **0.8100** | ≥ 0.60 | ✅ PASS |
+| task_hard — Multi-Fault Recovery | **0.7241** | ≥ 0.50 | ✅ PASS |
+| **Overall (LLM Baseline)** | **0.8114** | | ✅ ALL PASSED |
+
+**[🎮 Try the Live Demo](https://huggingface.co/spaces/revti126/selfheal-rl-demo)** · **[📖 API Docs](https://revti126-selfheal-rl.hf.space/docs)**
+
+---
+
+## 🚨 The Problem
+
+In production, microservice failures **cascade** — one database crash takes down auth, which kills the API gateway, which drops the entire platform. On-call engineers must:
 
 1. **Diagnose** — which service is the root cause?
 2. **Prioritize** — fix upstream dependencies first
 3. **Choose** — restart? rollback? scale up? reroute?
-4. **Act fast** — every step costs time and money
+4. **Act fast** — every minute of downtime costs revenue
 
-SelfHealRL trains an RL agent to do this autonomously.
+SelfHealRL trains an RL agent to do all of this **autonomously**, learning purely from experience with no hand-coded rules.
 
-## Architecture
+---
+
+## 🧠 Why RL — Not Just Rules?
+
+A heuristic agent with 20 hand-coded rules works for known failures. But real systems have:
+- **Unknown failure patterns** that evolve over time
+- **Hundreds of services** — writing rules for all combinations is impossible
+- **Changing environments** — a trained RL agent adapts, rules don't
+
+The LSTM-based RL agent **discovers** the fix-upstream-first strategy on its own through 1.25M steps of trial and error — the same way AlphaZero learned chess without being told any rules.
+
+---
+
+## 🏗️ Architecture
 
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Service Mesh (10 services)            │
-│                                                         │
-│  Gateway → Auth → User-DB     Search → Restaurant-DB   │
-│              ↓       ↑          ↓                       │
-│          Payment → Order-DB   Cache-Layer               │
-│              ↓                  ↑                       │
-│          Order ─────────────────┘                       │
-│              ↓                                          │
-│         Notification → User-DB                          │
-└─────────────────────────────────────────────────────────┘
-         ↕                              ↕
-   ┌──────────┐                  ┌─────────────┐
-   │ RL Agent │  ← 74-dim obs → │  Reward Fn   │
-   │  (PPO)   │                  │ (10 signals) │
-   └──────────┘                  └─────────────┘
+┌──────────────────────────────────────────────────────┐
+│               Service Mesh (10 services)              │
+│                                                      │
+│  api-gateway → auth-service → user-db                │
+│                    ↓          cache-layer            │
+│  payment-service → order-db                          │
+│  order-service  → order-db, cache-layer              │
+│  search-service → restaurant-db, cache-layer         │
+│  notification-service → user-db                      │
+└──────────────────────────────────────────────────────┘
+           ↕ 104-dim observation vector
+   ┌──────────────────┐        ┌─────────────────┐
+   │  RecurrentPPO    │        │   Reward Signal  │
+   │  LSTM (128 units)│ ←────→ │  10 components   │
+   │  Action Masking  │        │  +recovery/−waste│
+   └──────────────────┘        └─────────────────┘
+           ↓ 60 discrete actions (6 types × 10 services)
+   restart | scale_up | reroute | rollback | observe | do_nothing
 ```
 
-## Key Features
+---
 
-### Environment
-- **10-service mesh** modeled after a food delivery platform (gateway, auth, payment, order, search, notification, 4 databases)
-- **6 failure types**: memory leak, CPU spike, connection timeout, disk full, bad deployment, network partition
-- **Cascade simulation**: failures propagate through the dependency graph
-- **Stochastic recovery**: action success depends on failure type (e.g., rollback is 95% effective for bad deployments, but only 30% for network partitions)
-- **Partial observability**: agent must `observe` a service before seeing its metrics
+## ✨ Key Innovations
 
-### Agent Actions (6 types x 10 services = 60 discrete actions)
-| Action | Best For |
-|--------|----------|
-| `restart` | CPU spikes, connection timeouts |
-| `scale_up` | CPU spikes, memory leaks |
-| `reroute` | Network partitions |
-| `rollback` | Bad deployments (95% success) |
-| `observe` | Diagnose before acting |
-| `do_nothing` | Wait for recovery |
+### 1. RecurrentPPO + LSTM Memory
+Under partial observability, the agent must remember what it diagnosed 3 steps ago. An MLP forgets everything each step. Our LSTM (`hidden_size=128`) carries memory across the episode.
 
-### Evaluation (3 systems)
-1. **6 Programmatic Graders**: recovery, MTTR, cascade prevention, dependency ordering, efficiency, diagnosis accuracy
-2. **Multi-objective Reward** (10 components): service recovery (+10), root cause fix (+15), cascade caused (-5), wrong order (-5), etc.
-3. **LLM/Heuristic Scorer**: evaluates decision quality on root cause targeting, dependency awareness, timing, and overall strategy
+### 2. Action Masking
+Masks out illegal actions (e.g., restart a healthy service, re-observe an already-observed service) — reduces effective action space by ~50%, dramatically speeding up learning.
 
-### Training
-- **4-phase curriculum learning**: EASY (50k) → MEDIUM (100k) → HARD (500k) → CHAOS (600k) = 1.25M total steps
-- **RecurrentPPO + LSTM** (`lstm_hidden_size=128`) for memory across partial observability steps
-- **Action masking** — illegal actions masked out (~10x smaller effective action space)
-- **8 parallel envs** via `SubprocVecEnv` for 8x more diverse experience per update
-- **Shaped 104-dim observation**: +`has_unmet_deps`, +`steps_since_observed`, +`estimated_failure_type`
-- **Prioritized phase advancement**: stops early when `success_rate ≥ 70%`
+### 3. Shaped 104-dim Observation
+Beyond raw metrics, the agent sees:
+- `has_unmet_deps` — is this service's upstream still down?
+- `steps_since_observed` — how stale is this service's data?
+- `estimated_failure_type` — CPU/memory pattern inference
 
-## Results
+### 4. 4-Phase Curriculum Learning
+```
+Phase 1: EASY   (50k steps,  full obs)    → learn basic recovery
+Phase 2: MEDIUM (100k steps, full obs)    → handle cascades
+Phase 3: HARD   (500k steps, partial obs) → multi-fault + memory
+Phase 4: CHAOS  (600k steps, partial obs) → extreme scenarios
+```
+Mixed difficulty replay (e.g. 60% HARD + 20% MEDIUM + 20% EASY) prevents catastrophic forgetting.
 
-### OpenEnv Hackathon Task Scores (LLM Baseline — Qwen2.5-72B)
+### 5. Prioritized Phase Advancement
+Instead of fixed timesteps, each phase ends early when `success_rate ≥ 70%` — the agent advances as soon as it masters the current difficulty.
 
-| Task | Score | Threshold | Status |
-|:-----|:-----:|:---------:|:------:|
-| task_easy (Single Fault) | **0.9000** | ≥ 0.70 | ✅ PASS |
-| task_medium (Cascade Recovery) | **0.8100** | ≥ 0.60 | ✅ PASS |
-| task_hard (Multi-Fault) | **0.7241** | ≥ 0.50 | ✅ PASS |
-| **Overall** | **0.8114** | | ✅ ALL PASSED |
+---
 
-### PPO Agent (LSTM, 30 episodes per task)
+## 📊 Full Results
 
+### LSTM PPO Agent (30 episodes per task)
+| Task | Score | Pass Threshold | Status |
+|:-----|:-----:|:--------------:|:------:|
+| task_easy | 0.771 | ≥ 0.70 | ✅ |
+| task_medium | 0.876 | ≥ 0.60 | ✅ |
+| task_hard | 0.803 | ≥ 0.50 | ✅ |
+
+### LLM Baseline — Qwen2.5-72B (inference.py)
 | Task | Score | Status |
 |:-----|:-----:|:------:|
-| task_easy | 0.771 | ✅ PASS |
-| task_medium | 0.876 | ✅ PASS |
-| task_hard | 0.803 | ✅ PASS |
+| task_easy | 0.9000 | ✅ |
+| task_medium | 0.8100 | ✅ |
+| task_hard | 0.7241 | ✅ |
+| **Overall** | **0.8114** | ✅ |
 
 ### Heuristic Agent (rule-based baseline)
-
 | Difficulty | Success Rate | Grade |
 |:----------:|:------------:|:-----:|
 | EASY | 100% | 0.97 |
@@ -114,79 +141,112 @@ SelfHealRL trains an RL agent to do this autonomously.
 | HARD | 65% | 0.82 |
 | CHAOS | 75% | 0.86 |
 
-## Quick Start
+---
+
+## 🚀 Quick Start
 
 ```bash
-# Install dependencies
+git clone https://github.com/revtiraman/selfheal-rl
+cd selfheal-rl
 pip install -r requirements.txt
 
-# Verify environment
+# Run environment tests
 PYTHONPATH=. python run.py test
 
-# Train (single phase)
-PYTHONPATH=. python run.py train --phase phase1_easy
-
-# Train (full curriculum ~15 min)
-PYTHONPATH=. python run.py train --curriculum
-
-# Evaluate a model
-PYTHONPATH=. python run.py eval --model models/phase1_easy.zip
-
-# Launch Gradio demo
+# Launch interactive Gradio demo
 PYTHONPATH=. python run.py demo
+
+# Train full curriculum (~90 min, 1.25M steps)
+PYTHONPATH=. python run_training.py
+
+# Run LLM inference baseline
+export HF_TOKEN=your_token
+export API_BASE_URL=https://router.huggingface.co/v1
+export MODEL_NAME=Qwen/Qwen2.5-72B-Instruct
+python inference.py
 ```
 
-## Gradio Demo (4 tabs)
+### Docker
+```bash
+docker build -t selfheal-rl .
+docker run -p 8000:8000 selfheal-rl
+curl http://localhost:8000/health
+```
 
-| Tab | What it does |
+---
+
+## 🔌 OpenEnv API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/health` | GET | Liveness check |
+| `/tasks` | GET | List all 3 tasks |
+| `/reset` | POST | Start new episode |
+| `/reset/{task_id}` | POST | Start task-specific episode |
+| `/step` | POST | Take one action |
+| `/state` | GET | Current episode state |
+
+**Live API:** https://revti126-selfheal-rl.hf.space/docs
+
+---
+
+## 🎮 Gradio Demo
+
+**Live:** https://huggingface.co/spaces/revti126/selfheal-rl-demo
+
+| Tab | Description |
 |-----|-------------|
-| **Live Demo** | Run any agent on any difficulty, watch the animated service mesh |
-| **Agent vs Random** | Side-by-side comparison on the same failure scenario |
-| **Grading Report** | Batch evaluation across N episodes with 6 grader breakdown |
-| **LLM Analysis** | Per-decision scoring with root cause, dependency, timing analysis |
+| 🔴 Live Demo | Watch any agent recover a failure scenario in real time |
+| ⚔️ Agent vs Random | Side-by-side comparison on identical scenarios |
+| 📋 Grading Report | Batch evaluation with 6-metric breakdown |
+| 🧠 LLM Analysis | Per-decision quality scoring |
 
-## Project Structure
+---
+
+## 📁 Project Structure
 
 ```
 selfheal-rl/
-├── config.py                  # Hyperparameters, service definitions, rewards
-├── run.py                     # CLI entry point
-├── requirements.txt
 ├── env/
-│   ├── selfheal_env.py        # Gymnasium environment (SB3 compatible)
-│   ├── service_mesh.py        # 10 services + dependency graph
-│   ├── failure_engine.py      # Random + 7 scenario templates
-│   ├── cascade_simulator.py   # Cascade propagation + root cause tracking
-│   └── observations.py        # 74-dim observation encoder
+│   ├── selfheal_env.py       # Gymnasium env + action_masks()
+│   ├── service_mesh.py       # 10 services + dependency graph
+│   ├── failure_engine.py     # 6 failure types + 7 scenario templates
+│   ├── cascade_simulator.py  # Cascade propagation + root cause tracking
+│   └── observations.py       # 104-dim shaped observation encoder
 ├── core/
-│   ├── reward.py              # Multi-objective reward (10 components)
-│   ├── graders.py             # 6 programmatic graders
-│   ├── metrics.py             # Episode metrics + JSON export
-│   ├── llm_scorer.py          # LLM/heuristic decision scoring
-│   └── heuristic_agent.py     # Rule-based baseline agent
+│   ├── graders.py            # 6 programmatic graders
+│   ├── heuristic_agent.py    # Rule-based baseline
+│   ├── tasks.py              # 3 OpenEnv tasks + TaskGrader
+│   └── llm_scorer.py         # Decision quality scoring
 ├── training/
-│   ├── train.py               # PPO + 4-phase curriculum
-│   ├── callbacks.py           # Metrics + curriculum callbacks
-│   └── evaluate.py            # Evaluation + agent comparison
-└── ui/
-    ├── app.py                 # Gradio 4-tab dashboard
-    ├── visualizer.py          # Animated HTML service mesh
-    └── replay.py              # Frame-by-frame episode replay
+│   ├── train.py              # RecurrentPPO + curriculum + MixedDifficultyEnv
+│   ├── callbacks.py          # Metrics + prioritized phase advancement
+│   └── evaluate.py           # Evaluation utilities
+├── server/
+│   └── app.py                # FastAPI OpenEnv HTTP server
+├── ui/
+│   └── app.py                # Gradio 4-tab demo
+├── inference.py              # LLM baseline agent
+├── config.py                 # All hyperparameters
+├── openenv.yaml              # OpenEnv spec
+└── Dockerfile                # HF Spaces Docker image
 ```
 
-## Advanced Features
+---
 
-- **Partial Observability**: Under HARD/CHAOS, the agent sees `-1` for unobserved service metrics and must spend actions on `observe` before it can diagnose
-- **Dynamic Failure Progression**: Failures start as warnings, progress to degraded, then crash — early intervention earns bonus rewards
-- **Stochastic Recovery**: Each (action, failure_type) pair has a different success probability, forcing the agent to learn which actions work for which failures
-- **Cascade Prevention**: Agent is rewarded for preventing cascades and penalized for causing new ones through wrong-order actions
+## 🛠️ Tech Stack
 
-## Tech Stack
+| Component | Technology |
+|-----------|-----------|
+| RL Framework | Stable-Baselines3 + sb3-contrib |
+| Policy | RecurrentPPO (LSTM) + MaskablePPO |
+| Environment | Gymnasium 1.0 |
+| API Server | FastAPI + Uvicorn |
+| Demo UI | Gradio 6 |
+| Inference | OpenAI-compatible API (Qwen2.5-72B) |
+| Deployment | HuggingFace Spaces (Docker) |
 
-- **Gymnasium** — RL environment interface
-- **Stable-Baselines3** — PPO implementation
-- **Gradio** — Interactive web demo
-- **NumPy** — Observation encoding and metrics
+---
 
 ## License
 
