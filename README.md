@@ -79,22 +79,40 @@ SelfHealRL trains an RL agent to do this autonomously.
 3. **LLM/Heuristic Scorer**: evaluates decision quality on root cause targeting, dependency awareness, timing, and overall strategy
 
 ### Training
-- **4-phase curriculum learning**: EASY (50k steps) → MEDIUM (100k) → HARD (200k) → CHAOS (300k)
-- Progressive difficulty: more simultaneous failures, faster cascade, partial observability
-- PPO with tuned hyperparameters per phase
+- **4-phase curriculum learning**: EASY (50k) → MEDIUM (100k) → HARD (500k) → CHAOS (600k) = 1.25M total steps
+- **RecurrentPPO + LSTM** (`lstm_hidden_size=128`) for memory across partial observability steps
+- **Action masking** — illegal actions masked out (~10x smaller effective action space)
+- **8 parallel envs** via `SubprocVecEnv` for 8x more diverse experience per update
+- **Shaped 104-dim observation**: +`has_unmet_deps`, +`steps_since_observed`, +`estimated_failure_type`
+- **Prioritized phase advancement**: stops early when `success_rate ≥ 70%`
 
 ## Results
 
-Evaluated over 20 episodes per cell:
+### OpenEnv Hackathon Task Scores (LLM Baseline — Qwen2.5-72B)
 
-| Difficulty | Heuristic Agent | Random Agent |
-|:----------:|:---------------:|:------------:|
-| EASY       | **100%** success, grade 0.97 | 45% success, grade 0.60 |
-| MEDIUM     | **90%** success, grade 0.87  | 5% success, grade 0.41  |
-| HARD       | **65%** success, grade 0.82  | 0% success, grade 0.41  |
-| CHAOS      | **75%** success, grade 0.86  | 0% success, grade 0.55  |
+| Task | Score | Threshold | Status |
+|:-----|:-----:|:---------:|:------:|
+| task_easy (Single Fault) | **0.9000** | ≥ 0.70 | ✅ PASS |
+| task_medium (Cascade Recovery) | **0.8100** | ≥ 0.60 | ✅ PASS |
+| task_hard (Multi-Fault) | **0.7241** | ≥ 0.50 | ✅ PASS |
+| **Overall** | **0.8114** | | ✅ ALL PASSED |
 
-The heuristic agent (observe → fix upstream first → best action for failure type) provides a strong baseline. The PPO agent learns similar strategies through curriculum training.
+### PPO Agent (LSTM, 30 episodes per task)
+
+| Task | Score | Status |
+|:-----|:-----:|:------:|
+| task_easy | 0.771 | ✅ PASS |
+| task_medium | 0.876 | ✅ PASS |
+| task_hard | 0.803 | ✅ PASS |
+
+### Heuristic Agent (rule-based baseline)
+
+| Difficulty | Success Rate | Grade |
+|:----------:|:------------:|:-----:|
+| EASY | 100% | 0.97 |
+| MEDIUM | 90% | 0.87 |
+| HARD | 65% | 0.82 |
+| CHAOS | 75% | 0.86 |
 
 ## Quick Start
 
