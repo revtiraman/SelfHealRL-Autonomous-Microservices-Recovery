@@ -34,11 +34,7 @@ COPY core/   core/
 COPY env/    env/
 COPY server/ server/
 COPY training/ training/
-# models/ is gitignored (large .zip files); PPO agent loads from mounted volume or env var
-
-# ── Copy pre-trained model if available ───────────────────────
-# The selfheal_agent_final.zip is copied above via models/ directory.
-# If not present, the server still works — PPO agent just won't be available.
+COPY models/ models/
 
 # ── Environment ───────────────────────────────────────────────
 ENV PYTHONPATH=/app

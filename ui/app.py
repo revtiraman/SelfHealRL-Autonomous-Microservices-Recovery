@@ -22,10 +22,10 @@ _scorer = LLMScorer(mode="heuristic")
 
 def _load_ppo_model():
     try:
-        from stable_baselines3 import PPO
-        for path in ["models/selfheal_agent_final.zip", "models/phase3_hard_partial_best.zip", "models/phase1_easy.zip"]:
+        from sb3_contrib import RecurrentPPO
+        for path in ["models/selfheal_agent_final.zip", "models/phase4_chaos.zip", "models/phase3_hard_partial.zip"]:
             if os.path.exists(path):
-                return PPO.load(path)
+                return RecurrentPPO.load(path)
     except Exception:
         pass
     return None
@@ -33,7 +33,11 @@ def _load_ppo_model():
 
 def _run_episode(difficulty: str, agent_type: str, seed: int | None = None):
     """Run a full episode with the chosen agent. Returns (env, history)."""
-    partial = agent_type == "Trained PPO Agent"
+    # PPO uses partial obs only for HARD/CHAOS (matches training phases)
+    if agent_type == "Trained PPO Agent":
+        partial = difficulty in ("HARD", "CHAOS")
+    else:
+        partial = False
     env = SelfHealEnv(difficulty=difficulty, partial_observability=partial)
     obs, _ = env.reset(seed=seed)
 
@@ -42,24 +46,26 @@ def _run_episode(difficulty: str, agent_type: str, seed: int | None = None):
         heuristic.reset()
 
     ppo_model = _load_ppo_model() if agent_type == "Trained PPO Agent" else None
+    lstm_states = None
+    episode_start = np.ones((1,), dtype=bool)
 
     for _ in range(MAX_STEPS_PER_EPISODE):
         if heuristic is not None:
             statuses = env.mesh.get_all_statuses()
             act_type, target = heuristic.act(statuses)
-            # Record observation result so heuristic knows failure type
             if act_type == "observe":
                 svc_data = env.mesh.services.get(target)
                 if svc_data:
                     heuristic.record_observation(target, svc_data.failure_type or "unknown")
             action = heuristic.action_to_int(act_type, target)
         elif ppo_model is not None:
-            action, _ = ppo_model.predict(obs, deterministic=True)
+            action, lstm_states = ppo_model.predict(obs, state=lstm_states, episode_start=episode_start, deterministic=True)
             action = int(action)
         else:
             action = env.action_space.sample()
 
         obs, _, term, trunc, _ = env.step(action)
+        episode_start = np.array([term or trunc])
         if term or trunc:
             break
 
