@@ -272,15 +272,7 @@ def run_task(task_id: str, passing_score: float, seed: int = 42) -> dict:
     obs        = reset_resp.get("observation", {})
     info       = reset_resp.get("info", {})
 
-    print(json.dumps({
-        "type":       "START",
-        "task_id":    task_id,
-        "scenario":   info.get("scenario", ""),
-        "difficulty": info.get("difficulty", ""),
-        "model":      MODEL_NAME,
-        "seed":       seed,
-    }))
-    sys.stdout.flush()
+    print(f"[START] task={task_id} difficulty={info.get('difficulty', '')} model={MODEL_NAME}", flush=True)
 
     action_history = []
     step           = 0
@@ -304,20 +296,7 @@ def run_task(task_id: str, passing_score: float, seed: int = 42) -> dict:
             "reasoning": reasoning, "reward": reward,
         })
 
-        print(json.dumps({
-            "type":           "STEP",
-            "task_id":        task_id,
-            "step":           step,
-            "action":         f"{action_type}({target_service})",
-            "action_type":    action_type,
-            "target_service": target_service,
-            "reward":         round(float(reward), 4),
-            "system_health":  round(float(obs.get("system_health", 0)), 4),
-            "down_services":  obs.get("down_services", []),
-            "done":           done,
-            "reasoning":      str(reasoning),
-        }))
-        sys.stdout.flush()
+        print(f"[STEP] task={task_id} step={step} action={action_type}({target_service}) reward={round(float(reward), 4)} health={round(float(obs.get('system_health', 0)), 4)} done={done}", flush=True)
 
     # Extract score from final step info
     if done and last_step_info:
@@ -327,17 +306,7 @@ def run_task(task_id: str, passing_score: float, seed: int = 42) -> dict:
         else:
             score = float(last_step_info.get("overall_score", 0.0))
 
-    print(json.dumps({
-        "type":            "END",
-        "task_id":         task_id,
-        "score":           round(score, 4),
-        "passed":          score >= passing_score,
-        "passing_score":   passing_score,
-        "fully_recovered": float(obs.get("system_health", 0)) >= 1.0,
-        "final_health":    round(float(obs.get("system_health", 0)), 4),
-        "steps_taken":     step,
-    }))
-    sys.stdout.flush()
+    print(f"[END] task={task_id} score={round(score, 4)} passed={score >= passing_score} steps={step} health={round(float(obs.get('system_health', 0)), 4)}", flush=True)
 
     return {"task_id": task_id, "score": score, "passed": score >= passing_score,
             "passing_score": passing_score}
@@ -371,12 +340,7 @@ def main() -> int:
                 grade = run_task(task_id, passing_score, seed=42)
                 results[task_id] = grade
             except Exception as e:
-                print(json.dumps({
-                    "type": "END", "task_id": task_id,
-                    "score": 0.0, "passed": False,
-                    "passing_score": passing_score, "error": str(e),
-                }))
-                sys.stdout.flush()
+                print(f"[END] task={task_id} score=0.0 passed=False steps=0 error={e}", flush=True)
                 results[task_id] = {
                     "task_id": task_id, "score": 0.0, "passed": False,
                     "passing_score": passing_score,
@@ -386,18 +350,7 @@ def main() -> int:
         overall       = sum(r["score"] for r in results.values()) / max(1, len(results))
         all_passed    = all(r["passed"] for r in results.values())
 
-        print(json.dumps({
-            "type":               "SUMMARY",
-            "model":              MODEL_NAME,
-            "overall_score":      round(overall, 4),
-            "all_passed":         all_passed,
-            "total_time_seconds": round(total_elapsed, 1),
-            "tasks": {
-                tid: {"score": r["score"], "passed": r["passed"]}
-                for tid, r in results.items()
-            },
-        }))
-        sys.stdout.flush()
+        print(f"[SUMMARY] overall_score={round(overall, 4)} all_passed={all_passed} time={round(total_elapsed, 1)}s model={MODEL_NAME}", flush=True)
 
     except Exception as e:
         print(f"FATAL ERROR: {e}", file=sys.stderr)
@@ -409,19 +362,9 @@ def main() -> int:
 
 def _emit_zero_results():
     for task in TASKS:
-        print(json.dumps({
-            "type": "END", "task_id": task["task_id"],
-            "score": 0.0, "passed": False,
-            "passing_score": task["passing_score"],
-            "error": "environment not reachable",
-        }))
-    print(json.dumps({
-        "type": "SUMMARY", "model": MODEL_NAME,
-        "overall_score": 0.0, "all_passed": False,
-        "total_time_seconds": 0.0,
-        "tasks": {t["task_id"]: {"score": 0.0, "passed": False} for t in TASKS},
-    }))
-    sys.stdout.flush()
+        print(f"[START] task={task['task_id']} difficulty=unknown model={MODEL_NAME}", flush=True)
+        print(f"[END] task={task['task_id']} score=0.0 passed=False steps=0 error=environment_not_reachable", flush=True)
+    print(f"[SUMMARY] overall_score=0.0 all_passed=False time=0s model={MODEL_NAME}", flush=True)
 
 
 if __name__ == "__main__":
